@@ -7,182 +7,363 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains # New import
+from selenium.webdriver.common.action_chains import ActionChains
 import undetected_chromedriver as uc
 
 load_dotenv()
 
-def login_to_jobright(driver, email, password):
-    # This function remains the same
-    try:
-        print("Navigating to jobright.ai to log in...")
-        driver.get("https://jobright.ai/")
-        main_signin_button_selector = "//span[text()='SIGN IN']"
-        main_signin_button = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.XPATH, main_signin_button_selector))
-        )
-        main_signin_button.click()
-        print("Login modal opened.")
-        email_field_selector = "//input[@id='basic_email']"
-        password_field_selector = "//input[@id='basic_password']"
-        email_input = WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located((By.XPATH, email_field_selector))
-        )
-        password_input = driver.find_element(By.XPATH, password_field_selector)
-        print("Entering credentials...")
-        email_input.send_keys(email)
-        password_input.send_keys(password)
-        print("Submitting form by pressing Enter...")
-        password_input.send_keys(Keys.RETURN)
-        dashboard_element_selector = "//span[text()='Profile']"
-        print("Waiting for dashboard to load...")
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, dashboard_element_selector))
-        )
-        print("Login successful! Dashboard loaded.")
-        return True
-    except Exception as e:
-        print(f"An error occurred during login:")
-        driver.save_screenshot("/app/screenshots/login_failure.png")
-        print("Screenshot of failure saved to the 'screenshots' folder.")
-        print(traceback.format_exc())
-        return False
-
-def switch_to_most_recent(driver):
-    # This function remains the same
-    try:
-        print("Switching to 'Most Recent' jobs...")
-        dropdown_selector = "//div[contains(@class, 'index_jobs-recommend-sorter__')]"
-        dropdown = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, dropdown_selector))
-        )
-        dropdown.click()
-        most_recent_option_selector = "//div[@class='ant-select-item-option-content' and text()='Most Recent']"
-        most_recent_option = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, most_recent_option_selector))
-        )
-        most_recent_option.click()
-        print("Successfully switched to 'Most Recent'.")
-        time.sleep(3)
-        return True
-    except Exception as e:
-        print(f"Could not switch to 'Most Recent' jobs. Error: {e}")
-        return False
-
-def scrape_job_links(driver):
-    """
-    Scrolls down, then processes cards, dismissing the modal
-    with the Escape key for gentle error recovery.
-    """
-    final_urls = []
-    
-    # Scrolling logic remains the same
-    print("\n--- Scrolling down to load all jobs ---")
-    job_card_selector = "//div[contains(@class, 'index_job-card-main__spahH')]"
-    
-    while len(driver.find_elements(By.XPATH, job_card_selector)) < 150:
-        job_cards = driver.find_elements(By.XPATH, job_card_selector)
-        current_job_count = len(job_cards)
-        print(f"Currently found {current_job_count} jobs. Scrolling to load more...")
-        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", job_cards[-1])
+class JobRightScraper:
+    def __init__(self):
+        self.driver = None
+        self.main_window = None
+        self.job_urls = []
         
-        try:
-            spinner_selector = "//div[contains(@class, 'ant-spin-spinning')]"
-            WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, spinner_selector)))
-            WebDriverWait(driver, 20).until_not(EC.presence_of_element_located((By.XPATH, spinner_selector)))
-        except:
-            time.sleep(4)
+    def setup_driver(self):
+        """Initialize Chrome driver with proper options for Docker"""
+        options = uc.ChromeOptions()
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--remote-debugging-port=9222")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        
+        print("Initializing Chrome driver...")
+        self.driver = uc.Chrome(options=options)
+        self.main_window = self.driver.current_window_handle
+        return True
 
-        if len(driver.find_elements(By.XPATH, job_card_selector)) == current_job_count:
-            print("No new jobs loaded. Reached the end of the list.")
-            break
-            
-    print(f"\nFinished scrolling. Found a total of {len(driver.find_elements(By.XPATH, job_card_selector))} jobs.")
-    
-    initial_job_count = len(driver.find_elements(By.XPATH, job_card_selector))
-    main_window = driver.current_window_handle
-    apply_button_selector = ".//button[contains(@class, 'index_apply-button__kp79C')]"
-    close_modal_button_selector = "//button[@aria-label='Close']"
-    
-    for i in range(initial_job_count):
+    def login(self, email, password):
+        """Login to JobRight"""
         try:
-            all_cards_on_page = driver.find_elements(By.XPATH, job_card_selector)
-            current_card = all_cards_on_page[i]
-
-            # Scroll to the card to make sure it's in view before interacting
-            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", current_card)
-            time.sleep(1) # Give scroll a moment to settle
+            print("Navigating to JobRight...")
+            self.driver.get("https://jobright.ai/")
             
-            apply_button = WebDriverWait(current_card, 10).until(
-                EC.element_to_be_clickable((By.XPATH, apply_button_selector))
+            # Click sign in button
+            signin_btn = WebDriverWait(self.driver, 15).until(
+                EC.element_to_be_clickable((By.XPATH, "//span[text()='SIGN IN']"))
             )
-            driver.execute_script("arguments[0].click();", apply_button)
+            signin_btn.click()
             
-            WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
-            new_window = [w for w in driver.window_handles if w != main_window][0]
-            driver.switch_to.window(new_window)
+            # Enter credentials
+            email_field = WebDriverWait(self.driver, 10).until(
+                EC.visibility_of_element_located((By.XPATH, "//input[@id='basic_email']"))
+            )
+            password_field = self.driver.find_element(By.XPATH, "//input[@id='basic_password']")
+            
+            email_field.send_keys(email)
+            password_field.send_keys(password)
+            password_field.send_keys(Keys.RETURN)
+            
+            # Wait for login success
+            WebDriverWait(self.driver, 20).until(
+                EC.presence_of_element_located((By.XPATH, "//span[text()='Profile']"))
+            )
+            print("✅ Login successful!")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Login failed: {e}")
+            self.driver.save_screenshot("/app/screenshots/login_failure.png")
+            return False
+
+    def switch_to_most_recent(self):
+        """Switch job sorting to 'Most Recent'"""
+        try:
+            print("Switching to 'Most Recent' sorting...")
+            dropdown = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'index_jobs-recommend-sorter__')]"))
+            )
+            dropdown.click()
+            
+            most_recent_option = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//div[@class='ant-select-item-option-content' and text()='Most Recent']"))
+            )
+            most_recent_option.click()
             
             time.sleep(3)
-            final_url = driver.current_url
+            print("✅ Switched to 'Most Recent'")
+            return True
             
-            if "jobright.ai" not in final_url:
-                print(f"  -> Captured final URL for card #{i+1}: {final_url}")
-                final_urls.append(final_url)
+        except Exception as e:
+            print(f"❌ Could not switch to 'Most Recent': {e}")
+            return False
+
+    def load_jobs(self, target_count=150):
+        """Scroll to load jobs until we reach target count"""
+        print(f"Loading jobs until we have {target_count}...")
+        job_card_selector = "//div[contains(@class, 'index_job-card-main__spahH')]"
+        
+        while True:
+            job_cards = self.driver.find_elements(By.XPATH, job_card_selector)
+            current_count = len(job_cards)
             
-            driver.close()
-            driver.switch_to.window(main_window)
+            print(f"Currently loaded: {current_count} jobs")
             
-            close_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, close_modal_button_selector))
+            if current_count >= target_count:
+                break
+                
+            # Scroll to last card
+            if job_cards:
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", 
+                    job_cards[-1]
+                )
+                
+            # Wait for loading spinner
+            try:
+                WebDriverWait(self.driver, 3).until(
+                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'ant-spin-spinning')]"))
+                )
+                WebDriverWait(self.driver, 15).until_not(
+                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'ant-spin-spinning')]"))
+                )
+            except:
+                time.sleep(3)
+                
+            # Check if no new jobs loaded
+            if len(self.driver.find_elements(By.XPATH, job_card_selector)) == current_count:
+                print("No more jobs loading. Reached end of list.")
+                break
+                
+        final_count = len(self.driver.find_elements(By.XPATH, job_card_selector))
+        print(f"✅ Loaded {final_count} jobs total")
+        return final_count
+
+    def close_apply_modal(self):
+        """Close the 'Did you apply?' modal using multiple strategies"""
+        modal_closed = False
+        
+        # Strategy 1: Click "No, I didn't apply" button
+        try:
+            no_button = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'index_job-apply-confirm-popup-no-button__V7UbC')]"))
             )
-            driver.execute_script("arguments[0].click();", close_button)
+            self.driver.execute_script("arguments[0].click();", no_button)
+            print("✅ Clicked 'No, I didn't apply' button")
+            modal_closed = True
+        except:
+            print("⚠️ Could not find 'No, I didn't apply' button")
+        
+        # Strategy 2: Click close button if "No" button didn't work
+        if not modal_closed:
+            try:
+                close_button = WebDriverWait(self.driver, 3).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[@aria-label='Close']"))
+                )
+                self.driver.execute_script("arguments[0].click();", close_button)
+                print("✅ Clicked close button")
+                modal_closed = True
+            except:
+                print("⚠️ Could not find close button")
+        
+        # Strategy 3: Keyboard shortcut as fallback
+        if not modal_closed:
+            try:
+                print("Trying keyboard shortcut: Tab + Tab + Tab + Enter")
+                actions = ActionChains(self.driver)
+                actions.send_keys(Keys.TAB).send_keys(Keys.TAB).send_keys(Keys.TAB).send_keys(Keys.ENTER).perform()
+                modal_closed = True
+            except:
+                print("⚠️ Keyboard shortcut failed")
+        
+        # Strategy 4: ESC key as last resort
+        if not modal_closed:
+            try:
+                print("Trying ESC key")
+                ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+                modal_closed = True
+            except:
+                print("❌ All modal closing strategies failed")
+        
+        time.sleep(2)  # Give modal time to close
+        return modal_closed
+
+    def process_job_card(self, card_index):
+        """Process a single job card to extract URL with detailed logging"""
+        try:
+            # Get all current job cards
+            job_cards = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'index_job-card-main__spahH')]")
+
+            if card_index >= len(job_cards):
+                print(f"❌ Card #{card_index + 1} not found")
+                return None
+
+            current_card = job_cards[card_index]
+
+            # Scroll to card
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", 
+                current_card
+            )
             time.sleep(2)
+            print(f"📍 Scrolled to card #{card_index + 1}")
+
+            # Find apply button with more detailed logging
+            try:
+                apply_button = WebDriverWait(current_card, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, ".//button[contains(@class, 'index_apply-button__kp79C')]"))
+                )
+                print(f"🔘 Found apply button for card #{card_index + 1}")
+            except Exception as e:
+                print(f"❌ Could not find apply button for card #{card_index + 1}: {e}")
+
+                # Try alternative apply button selectors
+                try:
+                    apply_button = current_card.find_element(By.XPATH, ".//button[contains(text(), 'Apply')]")
+                    print(f"🔘 Found apply button with alternative selector")
+                except:
+                    print(f"❌ No apply button found with any selector")
+                    return None
+
+            # Click apply button
+            try:
+                initial_windows = len(self.driver.window_handles)
+                print(f"🪟 Current windows: {initial_windows}")
+    
+                # Method 1: Hover first, then real click
+                try:
+                    actions = ActionChains(self.driver)
+                    actions.move_to_element(apply_button).pause(0.5).click().perform()
+                    print(f"👆 Used ActionChains click for card #{card_index + 1}")
+                except:
+                    # Method 2: JavaScript click as fallback
+                    self.driver.execute_script("arguments[0].click();", apply_button)
+                    print(f"👆 Used JavaScript click for card #{card_index + 1}")
+    
+                # Wait for new window with better detection
+                try:
+                    # Wait a bit longer and check multiple times
+                    for attempt in range(10):  # 10 attempts = 10 seconds
+                        current_windows = len(self.driver.window_handles)
+                        print(f"🪟 Attempt {attempt + 1}: {current_windows} windows")
+                        
+                        if current_windows > initial_windows:
+                            print(f"🪟 New window detected after {attempt + 1} seconds!")
+                            break
+                            
+                        time.sleep(1)
+                    else:
+                        print(f"❌ No new window opened after 10 seconds")
+                        
+                        # Debug: Check if button is actually clickable
+                        print(f"🔍 Button enabled: {apply_button.is_enabled()}")
+                        print(f"🔍 Button displayed: {apply_button.is_displayed()}")
+                        
+                        # Try clicking the button text/span instead
+                        try:
+                            button_text = apply_button.find_element(By.TAG_NAME, "span")
+                            ActionChains(self.driver).move_to_element(button_text).click().perform()
+                            print(f"👆 Clicked button text as backup")
+                            
+                            # Wait again
+                            WebDriverWait(self.driver, 5).until(lambda d: len(d.window_handles) > initial_windows)
+                            print(f"🪟 New window opened with button text click!")
+                        except:
+                            print(f"❌ Button text click also failed")
+                            return None
+                            
+                except Exception as e:
+                    print(f"❌ Error waiting for new window: {e}")
+                    return None
+
+            except Exception as e:
+                print(f"❌ Error clicking apply button: {e}")
+                return None
+
+            # Switch to new window
+            new_window = [w for w in self.driver.window_handles if w != self.main_window][0]
+            self.driver.switch_to.window(new_window)
+
+            # Get URL and close window
+            time.sleep(3)
+            job_url = self.driver.current_url
+            print(f"🔗 Got URL: {job_url}")
+            self.driver.close()
+
+            # Switch back to main window
+            self.driver.switch_to.window(self.main_window)
+
+            # Handle the modal
+            time.sleep(2)
+            self.close_apply_modal()
+
+            # Only return external URLs
+            if "jobright.ai" not in job_url:
+                print(f"✅ Card #{card_index + 1}: {job_url}")
+                return job_url
+            else:
+                print(f"⚠️ Card #{card_index + 1}: Internal URL, skipping")
+                return None
 
         except Exception as e:
-            print(f"  -> Could not process job card #{i+1}. Error: {type(e).__name__}")
-            screenshot_path = f"/app/screenshots/card_failure_{i+1}.png"
-            driver.save_screenshot(screenshot_path)
-            print(f"     Screenshot saved. Attempting to recover by pressing ESCAPE.")
-            
-            # --- START OF GENTLE ERROR RECOVERY ---
-            # Instead of refreshing, we send the ESCAPE key to close any modal
-            ActionChains(driver).send_keys(Keys.ESCAPE).perform()
-            time.sleep(2) # Give modal time to close
-            # --- END OF GENTLE ERROR RECOVERY ---
-            
-            if len(driver.window_handles) > 1:
-                driver.close()
-                driver.switch_to.window(main_window)
-            continue
-            
-    print("\nFinished scraping.")
-    return final_urls
+            print(f"❌ Unexpected error processing card #{card_index + 1}: {type(e).__name__}: {e}")
+            # ... rest of cleanup code
 
+    def scrape_jobs(self, max_jobs=50):
+        """Main scraping function"""
+        print(f"Starting to scrape up to {max_jobs} jobs...")
+        
+        job_cards = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'index_job-card-main__spahH')]")
+        total_cards = min(len(job_cards), max_jobs)
+        
+        for i in range(total_cards):
+            print(f"\n--- Processing job {i + 1}/{total_cards} ---")
+            url = self.process_job_card(i)
+            if url:
+                self.job_urls.append(url)
+                
+        return self.job_urls
+
+    def run(self):
+        """Main execution flow"""
+        try:
+            # Setup
+            if not self.setup_driver():
+                return []
+                
+            # Get credentials
+            email = os.environ.get("JOBRIGHT_EMAIL")
+            password = os.environ.get("JOBRIGHT_PASSWORD")
+            
+            if not email or not password:
+                print("❌ Missing credentials in environment variables")
+                return []
+            
+            # Execute workflow
+            if not self.login(email, password):
+                return []
+                
+            if not self.switch_to_most_recent():
+                return []
+                
+            self.load_jobs(150)
+            urls = self.scrape_jobs(3)  # Process first 3 jobs
+
+            return urls
+            
+        except Exception as e:
+            print(f"❌ Fatal error: {e}")
+            traceback.print_exc()
+            return []
+            
+        finally:
+            if self.driver:
+                self.driver.quit()
 
 if __name__ == "__main__":
-    options = uc.ChromeOptions()
-    # For debugging, it can be helpful to run with a visible browser
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
-
-
-    print("Initializing undetected chromedriver...")
-    driver = uc.Chrome(options=options, use_subprocess=False)
-
-    email = os.environ.get("JOBRIGHT_EMAIL")
-    password = os.environ.get("JOBRIGHT_PASSWORD")
-
-    if not email or not password:
-        print("Error: JOBRIGHT_EMAIL and JOBRIGHT_PASSWORD must be set in the .env file.")
+    scraper = JobRightScraper()
+    collected_urls = scraper.run()
+    
+    print(f"\n{'='*50}")
+    print(f"SCRAPING COMPLETE")
+    print(f"{'='*50}")
+    print(f"Total URLs collected: {len(collected_urls)}")
+    
+    if collected_urls:
+        print("\n--- COLLECTED URLS ---")
+        for i, url in enumerate(collected_urls, 1):
+            print(f"{i:2d}. {url}")
     else:
-        if login_to_jobright(driver, email, password):
-            if switch_to_most_recent(driver):
-                collected_urls = scrape_job_links(driver)
-                print("\n--- All Collected URLs ---")
-                for url in sorted(list(set(collected_urls))):
-                    print(url)
-
-    print("\nAll tasks complete. Closing browser.")
-    driver.quit()
+        print("No URLs were collected.")
