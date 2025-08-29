@@ -1,0 +1,6 @@
+selenium
+python-dotenv
+undetected-chromedriver
+setuptools
+Flask
+gunicorn

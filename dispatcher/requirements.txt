@@ -1,0 +1,8 @@
+selenium
+python-dotenv
+undetected-chromedriver
+setuptools
+google-cloud-pubsub
+Flask
+requests
+gunicorn
