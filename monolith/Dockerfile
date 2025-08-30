@@ -38,4 +38,4 @@ COPY scraper.py .
 COPY app.py .
 
 # Run the web server with a long timeout for the scraping task
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "3600", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "4200", "--worker-class", "gevent", "app:app"]

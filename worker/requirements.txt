@@ -1,6 +1,11 @@
-selenium
 python-dotenv
-undetected-chromedriver
 setuptools
 Flask
 gunicorn
+gspread
+google-cloud-secret-manager
+oauth2client
+google-cloud-pubsub
+requests
+datetime
+google-generativeai

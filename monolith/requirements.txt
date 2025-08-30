@@ -2,6 +2,8 @@ selenium
 python-dotenv
 undetected-chromedriver
 setuptools
+google-cloud-pubsub
 Flask
 gunicorn
+gevent
 requests

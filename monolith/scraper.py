@@ -301,7 +301,7 @@ class JobRightScraper:
             print(f"❌ Unexpected error processing card #{card_index + 1}: {type(e).__name__}: {e}")
             # ... rest of cleanup code
 
-    def scrape_jobs(self, max_jobs=50):
+    def scrape_jobs(self, max_jobs=150):
         """Main scraping function"""
         print(f"Starting to scrape up to {max_jobs} jobs...")
         
@@ -339,7 +339,7 @@ class JobRightScraper:
                 return []
                 
             self.load_jobs(150)
-            urls = self.scrape_jobs(3)  # Process first 3 jobs
+            urls = self.scrape_jobs(150)  # Process first 150 jobs
 
             return urls
             
