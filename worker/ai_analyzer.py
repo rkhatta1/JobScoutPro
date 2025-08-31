@@ -24,7 +24,7 @@ def get_gemini_api_key():
     client = secretmanager.SecretManagerServiceClient()
     secret_name = f"projects/{GCP_PROJECT_ID}/secrets/gemini-api-key/versions/latest"
     response = client.access_secret_version(name=secret_name)
-    GEMINI_API_KEY = response.payload.data.decode("UTF-8")
+    GEMINI_API_KEY = response.payload.data.decode("UTF-8").strip()
     return GEMINI_API_KEY
 
 def get_resume_content():
@@ -32,14 +32,11 @@ def get_resume_content():
     global RESUME_CONTENT
     if RESUME_CONTENT: return RESUME_CONTENT
     
-    resume_path = "/run/secrets/RESUME_LATEX"
-    if os.path.exists(resume_path):
-        with open(resume_path, "r") as f:
-            RESUME_CONTENT = f.read()
-        return RESUME_CONTENT
-    else:
-        print("⚠️ Resume secret file not found.")
-        return None
+    client = secretmanager.SecretManagerServiceClient()
+    secret_name = f"projects/{GCP_PROJECT_ID}/secrets/resume-latex/versions/latest"
+    response = client.access_secret_version(name=secret_name)
+    RESUME_CONTENT = response.payload.data.decode("UTF-8")
+    return RESUME_CONTENT
 
 def chunk_list(data, chunk_size):
     """Splits a list into smaller chunks of a specified size."""

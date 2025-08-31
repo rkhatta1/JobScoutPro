@@ -1,8 +1,10 @@
 import os
 import time
 import traceback
+import json
 from dotenv import load_dotenv
 from selenium import webdriver
+from google.cloud import pubsub_v1
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
@@ -362,8 +364,32 @@ if __name__ == "__main__":
     print(f"Total URLs collected: {len(collected_urls)}")
     
     if collected_urls:
-        print("\n--- COLLECTED URLS ---")
-        for i, url in enumerate(collected_urls, 1):
-            print(f"{i:2d}. {url}")
+        GCP_PROJECT_ID = os.environ.get("GCLOUD_PROJECT")
+        TOPIC_ID = "scraped-urls"
+        
+        if not GCP_PROJECT_ID:
+            raise ValueError("GCLOUD_PROJECT environment variable not set.")
+
+        publisher = pubsub_v1.PublisherClient()
+        topic_path = publisher.topic_path(GCP_PROJECT_ID, TOPIC_ID)
+
+        def chunk_list(data, num_chunks):
+            k, m = divmod(len(data), num_chunks)
+            return [data[i*k+min(i, m):(i+1)*k+min(i+1, m)] for i in range(num_chunks)]
+
+        num_batches = 2  # Based on worker's max-instances
+        url_batches = chunk_list(list(set(collected_urls)), num_batches)
+        
+        print(f"\n--- Publishing {len(collected_urls)} URLs in {num_batches} batches ---")
+        
+        for i, batch in enumerate(url_batches):
+            if not batch: continue
+            
+            message_data = {"urls": batch}
+            message_future = publisher.publish(topic_path, data=json.dumps(message_data).encode("utf-8"))
+            message_future.result() # Wait for the publish to complete
+            print(f"🚀 Dispatched batch #{i+1} with {len(batch)} URLs.")
+            
+        print("✅ All URLs published successfully.")
     else:
         print("No URLs were collected.")

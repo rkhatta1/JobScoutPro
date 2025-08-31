@@ -35,7 +35,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code (scraper library and app entrypoint)
 COPY scraper.py .
-COPY app.py .
 
 # Run the web server with a long timeout for the scraping task
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "4200", "--worker-class", "gevent", "app:app"]
+CMD ["python3", "scraper.py"]
