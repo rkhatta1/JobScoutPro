@@ -7,6 +7,7 @@ from flask import Flask, request
 from google.cloud import secretmanager
 import google.generativeai as genai
 import gspread
+from google.auth import default
 
 app = Flask(__name__)
 
@@ -43,6 +44,22 @@ def chunk_list(data, chunk_size):
     for i in range(0, len(data), chunk_size):
         yield data[i:i + chunk_size]
 
+def deduplicate_by_url(matches):
+    """Simple deduplication by URL only"""
+    seen_urls = set()
+    unique_matches = []
+    
+    for job in matches:
+        url = job.get("url", "").strip()
+        if url not in seen_urls and url:
+            seen_urls.add(url)
+            unique_matches.append(job)
+        else:
+            print(f"🗑️ Duplicate URL: {job.get('companyName')} - {job.get('positionName')}")
+    
+    print(f"🔍 URL deduplication: {len(matches)} → {len(unique_matches)} jobs")
+    return unique_matches
+
 @app.route("/", methods=["POST"])
 def analyze_job_batch():
     """Receives a large batch of URLs, breaks it into smaller chunks for Gemini,
@@ -68,7 +85,7 @@ def analyze_job_batch():
 
         api_key = get_gemini_api_key()
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         
         all_good_matches = []
         
@@ -120,33 +137,42 @@ def analyze_job_batch():
             
             chunk_matches = analysis_result.get("good_matches", [])
             if chunk_matches:
-                print(f"✅ Gemini found {len(chunk_matches)} good matches in this chunk.")
+                print(f"✅ Gemini found {len(chunk_matches)} good matches in this chunk. \n\n Matches: {json.dumps(chunk_matches, indent=2)}")
                 all_good_matches.extend(chunk_matches)
             else:
                 print("❌ Gemini: No good matches found in this chunk.")
         # --- END OF GEMINI BATCHING FIX ---
 
         if all_good_matches:
-            print(f"\n✅ All chunks processed. Total good matches found: {len(all_good_matches)}. Logging to Google Sheet...")
-            
-            sa = gspread.service_account()
-            sheet = sa.open_by_key(SHEET_ID).worksheet("applications")
-            
-            rows_to_add = []
-            for job in all_good_matches:
-                rows_to_add.append([
-                    job.get("companyName"),
-                    job.get("positionName"),
-                    "Applying",
-                    job.get("url"),
-                    "", 
-                    datetime.now().strftime("%Y-%m-%d"),
-                    "Scraped from JobRight, needs review."
-                ])
-            
-            if rows_to_add:
-                sheet.append_rows(rows_to_add)
-                print(f"📝 Successfully logged {len(rows_to_add)} jobs to Google Sheet.")
+            print(f"\n🔍 Deduplicating {len(all_good_matches)} matches...")
+            unique_matches = deduplicate_by_url(all_good_matches)
+
+            if unique_matches:
+                print(f"\n✅ After deduplication: {len(unique_matches)} unique jobs. Logging to Google Sheet...")
+
+                from google.auth import default
+                creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
+                sa = gspread.authorize(creds)
+
+                sheet = sa.open_by_key(SHEET_ID).worksheet("applications")
+
+                rows_to_add = []
+                for job in unique_matches:  # Use unique_matches instead of all_good_matches
+                    rows_to_add.append([
+                        job.get("companyName"),
+                        job.get("positionName"),
+                        "applying",
+                        job.get("url"),
+                        "",
+                        datetime.now().strftime("%Y-%m-%d"),
+                        "Scraped from JobRight, needs review."
+                    ])
+
+                if rows_to_add:
+                    sheet.append_rows(rows_to_add)
+                    print(f"📝 Successfully logged {len(rows_to_add)} unique jobs to Google Sheet.")
+            else:
+                print("\n❌ No unique matches remaining after deduplication.")
         else:
             print("\n❌ All chunks processed. No good matches found in the entire batch.")
 

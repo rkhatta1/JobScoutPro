@@ -304,14 +304,28 @@ class JobRightScraper:
             # ... rest of cleanup code
 
     def scrape_jobs(self, max_jobs=150):
-        """Main scraping function"""
-        print(f"Starting to scrape up to {max_jobs} jobs...")
-        
+        """Main scraping function with configurable range"""
+        # Get range parameters from environment variables
+        start_index = int(os.environ.get("START_INDEX", 0))
+        end_index = int(os.environ.get("END_INDEX", max_jobs))
+        instance_name = os.environ.get("INSTANCE_NAME", "default")
+
+        print(f"🎯 {instance_name}: Processing jobs {start_index + 1}-{end_index}")
+
         job_cards = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'index_job-card-main__spahH')]")
-        total_cards = min(len(job_cards), max_jobs)
-        
-        for i in range(total_cards):
-            print(f"\n--- Processing job {i + 1}/{total_cards} ---")
+        total_available = len(job_cards)
+
+        # Ensure we don't go beyond available jobs
+        actual_end = min(end_index, total_available)
+
+        if start_index >= total_available:
+            print(f"❌ {instance_name}: Start index {start_index} exceeds available jobs ({total_available})")
+            return []
+
+        print(f"📊 {instance_name}: {total_available} jobs available, processing indices {start_index}-{actual_end-1}")
+
+        for i in range(start_index, actual_end):
+            print(f"\n--- {instance_name}: Processing job {i + 1}/{actual_end} (index {i}) ---")
             url = self.process_job_card(i)
             if url:
                 self.job_urls.append(url)
@@ -321,32 +335,36 @@ class JobRightScraper:
     def run(self):
         """Main execution flow"""
         try:
+            instance_name = os.environ.get("INSTANCE_NAME", "default")
+            print(f"🚀 Starting collector instance: {instance_name}")
+
             # Setup
             if not self.setup_driver():
                 return []
-                
+
             # Get credentials
             email = os.environ.get("JOBRIGHT_EMAIL")
             password = os.environ.get("JOBRIGHT_PASSWORD")
-            
+
             if not email or not password:
                 print("❌ Missing credentials in environment variables")
                 return []
-            
+
             # Execute workflow
             if not self.login(email, password):
                 return []
-                
+
             if not self.switch_to_most_recent():
                 return []
-                
-            self.load_jobs(150)
-            urls = self.scrape_jobs(150)  # Process first 150 jobs
 
+            self.load_jobs(150)  # Both instances load all 150 jobs
+            urls = self.scrape_jobs(150)  # But each processes different ranges
+
+            print(f"🎯 {instance_name}: Collected {len(urls)} URLs")
             return urls
-            
+
         except Exception as e:
-            print(f"❌ Fatal error: {e}")
+            print(f"❌ Fatal error in {instance_name}: {e}")
             traceback.print_exc()
             return []
             

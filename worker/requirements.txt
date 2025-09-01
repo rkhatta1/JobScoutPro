@@ -6,6 +6,7 @@ gspread
 google-cloud-secret-manager
 oauth2client
 google-cloud-pubsub
+google-auth
 requests
 datetime
 google-generativeai
