@@ -9,6 +9,7 @@ from google.auth import default
 import google.generativeai as genai
 import gspread
 
+# Testing the gh workflow
 # --- Configuration ---
 GCP_PROJECT_ID = os.environ.get("GCLOUD_PROJECT")
 GEMINI_API_KEY = None
