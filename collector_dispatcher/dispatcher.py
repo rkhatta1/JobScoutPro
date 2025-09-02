@@ -7,7 +7,7 @@ app = Flask(__name__)
 
 # These will be set by the gcloud run deploy command
 GCP_PROJECT = os.environ.get("GCLOUD_PROJECT")
-GCP_LOCATION = "us-central1"
+GCP_LOCATION = os.environ.get("SERVICE_REGION")
 JOB_NAME = os.environ.get("COLLECTOR_JOB_NAME")
 
 @app.route("/", methods=["GET"])
