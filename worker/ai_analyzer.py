@@ -2,18 +2,15 @@ import os
 import json
 import base64
 import traceback
+import argparse
 from datetime import datetime
-from flask import Flask, request
 from google.cloud import secretmanager
+from google.auth import default
 import google.generativeai as genai
 import gspread
-from google.auth import default
-
-app = Flask(__name__)
 
 # --- Configuration ---
 GCP_PROJECT_ID = os.environ.get("GCLOUD_PROJECT")
-SHEET_ID = os.environ.get("SHEET_ID")
 GEMINI_API_KEY = None
 RESUME_CONTENT = None
 
@@ -29,15 +26,22 @@ def get_gemini_api_key():
     return GEMINI_API_KEY
 
 def get_resume_content():
-    """Reads the resume content from the secret file path."""
+    """Fetches the resume content from Secret Manager."""
     global RESUME_CONTENT
     if RESUME_CONTENT: return RESUME_CONTENT
     
     client = secretmanager.SecretManagerServiceClient()
     secret_name = f"projects/{GCP_PROJECT_ID}/secrets/resume-latex/versions/latest"
     response = client.access_secret_version(name=secret_name)
-    RESUME_CONTENT = response.payload.data.decode("UTF-8")
+    RESUME_CONTENT = response.payload.data.decode("UTF-8").strip()
     return RESUME_CONTENT
+
+def get_sheet_id():
+    """Fetches the Google Sheet ID from Secret Manager."""
+    client = secretmanager.SecretManagerServiceClient()
+    secret_name = f"projects/{GCP_PROJECT_ID}/secrets/google-sheet-id/versions/latest"
+    response = client.access_secret_version(name=secret_name)
+    return response.payload.data.decode("UTF-8").strip()
 
 def chunk_list(data, chunk_size):
     """Splits a list into smaller chunks of a specified size."""
@@ -45,7 +49,7 @@ def chunk_list(data, chunk_size):
         yield data[i:i + chunk_size]
 
 def deduplicate_by_url(matches):
-    """Simple deduplication by URL only"""
+    """Simple deduplication by URL within current batch"""
     seen_urls = set()
     unique_matches = []
     
@@ -55,33 +59,67 @@ def deduplicate_by_url(matches):
             seen_urls.add(url)
             unique_matches.append(job)
         else:
-            print(f"🗑️ Duplicate URL: {job.get('companyName')} - {job.get('positionName')}")
+            print(f"🗑️ Duplicate URL in batch: {job.get('companyName')} - {job.get('positionName')}")
     
-    print(f"🔍 URL deduplication: {len(matches)} → {len(unique_matches)} jobs")
+    print(f"🔍 Batch deduplication: {len(matches)} → {len(unique_matches)} jobs")
     return unique_matches
 
-@app.route("/", methods=["POST"])
-def analyze_job_batch():
-    """Receives a large batch of URLs, breaks it into smaller chunks for Gemini,
-    analyzes them, and logs all good matches to Sheets."""
-    envelope = request.get_json()
-    if not envelope or "message" not in envelope:
-        return "Bad Request", 400
-
-    pubsub_message = envelope["message"]
+def check_against_existing_sheet_and_deduplicate(matches, sheet_id):
+    """Remove duplicates both within the batch and against existing sheet entries"""
+    
+    # First, deduplicate within the current batch
+    unique_matches = deduplicate_by_url(matches)
+    
+    if not unique_matches:
+        return []
+    
+    # Then check against existing Google Sheet entries
     try:
-        data_str = base64.b64decode(pubsub_message["data"]).decode("utf-8")
-        data = json.loads(data_str)
-        urls_to_process = data.get("urls", [])
+        creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
+        sa = gspread.authorize(creds)
+        
+        sheet = sa.open_by_key(sheet_id).worksheet("applications")
+        
+        # Get all existing URLs from the sheet (assuming URL is in column D)
+        existing_data = sheet.get_all_values()
+        if len(existing_data) > 1:  # Skip header row
+            existing_urls = {row[3].strip() for row in existing_data[1:] if len(row) > 3 and row[3].strip()}
+        else:
+            existing_urls = set()
+        
+        print(f"📋 Found {len(existing_urls)} existing URLs in Google Sheet")
+        
+        # Filter out URLs that already exist in the sheet
+        new_unique_matches = []
+        for job in unique_matches:
+            url = job.get("url", "").strip()
+            if url not in existing_urls:
+                new_unique_matches.append(job)
+            else:
+                print(f"🗑️ Already exists in sheet: {job.get('companyName')} - {job.get('positionName')}")
+        
+        print(f"🔍 Sheet deduplication: {len(unique_matches)} → {len(new_unique_matches)} jobs")
+        return new_unique_matches
+        
+    except Exception as e:
+        print(f"⚠️ Error checking against existing sheet: {e}")
+        return unique_matches
+
+def analyze_job_batch(urls_json):
+    """Analyzes a batch of URLs and returns good matches"""
+    try:
+        urls_to_process = json.loads(urls_json)
         
         if not urls_to_process:
-            return "Empty batch received.", 200
+            print("Empty batch received.")
+            return []
 
-        print(f"🧠 AI Analyzer received a large batch of {len(urls_to_process)} URLs.")
+        print(f"🧠 AI Analyzer Job processing {len(urls_to_process)} URLs.")
         
         resume_latex = get_resume_content()
         if not resume_latex:
-            return "Could not load resume from secret.", 500
+            print("Could not load resume from secret.")
+            return []
 
         api_key = get_gemini_api_key()
         genai.configure(api_key=api_key)
@@ -89,9 +127,8 @@ def analyze_job_batch():
         
         all_good_matches = []
         
-        # --- START OF GEMINI BATCHING FIX ---
-        # Break the 75 URLs into smaller chunks of 15
-        url_chunks = list(chunk_list(urls_to_process, 15))
+        # Break URLs into smaller chunks of 5 (reduced for job reliability)
+        url_chunks = list(chunk_list(urls_to_process, 5))
 
         for i, chunk in enumerate(url_chunks):
             print(f"--- Processing Gemini chunk {i+1}/{len(url_chunks)} with {len(chunk)} URLs ---")
@@ -121,64 +158,115 @@ def analyze_job_batch():
                         "companyName": "TechCorp",
                         "positionName": "Junior Software Engineer",
                         "url": "https://xyz.com/job/12345"
-                    }},
-                    {{
-                        "companyName": "InnovateX",
-                        "positionName": "Software Developer",
-                        "url": "https://xyz.com/job/67890"
                     }}
                 ]
             }}
             """
             
-            response = model.generate_content(prompt)
-            cleaned_response = response.text.strip().replace("```json", "").replace("```", "")
-            analysis_result = json.loads(cleaned_response)
+            try:
+                response = model.generate_content(prompt)
+                cleaned_response = response.text.strip().replace("```json", "").replace("```", "")
+                
+                if not cleaned_response:
+                    print(f"❌ Empty response from Gemini for chunk {i+1}")
+                    continue
+                    
+                analysis_result = json.loads(cleaned_response)
+                chunk_matches = analysis_result.get("good_matches", [])
+                
+                if chunk_matches:
+                    print(f"✅ Gemini found {len(chunk_matches)} good matches in this chunk.")
+                    all_good_matches.extend(chunk_matches)
+                else:
+                    print("❌ Gemini: No good matches found in this chunk.")
+                    
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON parse error for chunk {i+1}: {e}")
+                continue
+            except Exception as e:
+                print(f"❌ Error processing chunk {i+1}: {e}")
+                continue
+
+        return all_good_matches
+
+    except Exception as e:
+        print(f"❌ Fatal error in AI analysis: {e}")
+        traceback.print_exc()
+        return []
+
+def main():
+    parser = argparse.ArgumentParser(description='AI Job Analyzer')
+    parser.add_argument('--urls-json', required=True, help='JSON string of URLs to analyze')
+    parser.add_argument('--batch-id', default='unknown', help='Batch identifier for logging')
+    
+    args = parser.parse_args()
+    
+    print(f"🚀 Starting AI Analyzer Job (Batch: {args.batch_id})")
+    
+    # Analyze the URLs
+    all_good_matches = analyze_job_batch(args.urls_json)
+    
+    if all_good_matches:
+        print(f"\n🔍 Found {len(all_good_matches)} matches. Processing deduplication...")
+        
+        sheet_id = get_sheet_id()
+        unique_matches = check_against_existing_sheet_and_deduplicate(all_good_matches, sheet_id)
+        
+        if unique_matches:
+            print(f"\n✅ After deduplication: {len(unique_matches)} unique jobs. Logging to Google Sheet...")
             
-            chunk_matches = analysis_result.get("good_matches", [])
-            if chunk_matches:
-                print(f"✅ Gemini found {len(chunk_matches)} good matches in this chunk. \n\n Matches: {json.dumps(chunk_matches, indent=2)}")
-                all_good_matches.extend(chunk_matches)
-            else:
-                print("❌ Gemini: No good matches found in this chunk.")
-        # --- END OF GEMINI BATCHING FIX ---
+            creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
+            sa = gspread.authorize(creds)
+            
+            sheet = sa.open_by_key(sheet_id).worksheet("applications")
+            
+            rows_to_add = []
+            for job in unique_matches:
+                rows_to_add.append([
+                    job.get("companyName"),
+                    job.get("positionName"),
+                    "applying",
+                    job.get("url"),
+                    datetime.now().strftime("%Y-%m-%d"),
+                    "Scraped from JobRight, needs review."
+                ])
+            
+            if rows_to_add:
+                # Get the starting row number
+                all_values = sheet.get_all_values()
+                start_row = len(all_values) + 1
+                end_row = start_row + len(unique_matches) - 1
 
-        if all_good_matches:
-            print(f"\n🔍 Deduplicating {len(all_good_matches)} matches...")
-            unique_matches = deduplicate_by_url(all_good_matches)
+                # Prepare data for columns A-D
+                main_data = []
+                date_notes_data = []
 
-            if unique_matches:
-                print(f"\n✅ After deduplication: {len(unique_matches)} unique jobs. Logging to Google Sheet...")
-
-                from google.auth import default
-                creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
-                sa = gspread.authorize(creds)
-
-                sheet = sa.open_by_key(SHEET_ID).worksheet("applications")
-
-                rows_to_add = []
-                for job in unique_matches:  # Use unique_matches instead of all_good_matches
-                    rows_to_add.append([
+                for job in unique_matches:
+                    main_data.append([
                         job.get("companyName"),
                         job.get("positionName"),
-                        "applying",
-                        job.get("url"),
-                        "",
+                        "applying", 
+                        job.get("url")
+                    ])
+
+                    date_notes_data.append([
                         datetime.now().strftime("%Y-%m-%d"),
                         "Scraped from JobRight, needs review."
                     ])
 
-                if rows_to_add:
-                    sheet.append_rows(rows_to_add)
-                    print(f"📝 Successfully logged {len(rows_to_add)} unique jobs to Google Sheet.")
-            else:
-                print("\n❌ No unique matches remaining after deduplication.")
+                # Batch update - columns A-D
+                sheet.update(f'A{start_row}:D{end_row}', main_data)
+
+                # Batch update - columns F-G (skipping E for relevant contacts)
+                sheet.update(f'F{start_row}:G{end_row}', date_notes_data)
+
+                print(f"📝 Successfully logged {len(unique_matches)} unique jobs to Google Sheet.")
         else:
-            print("\n❌ All chunks processed. No good matches found in the entire batch.")
+            print("\n❌ No unique matches remaining after deduplication.")
+    else:
+        print("\n❌ No good matches found in any chunks.")
+    
+    print(f"✅ AI Analyzer Job completed (Batch: {args.batch_id})")
 
-        return "Successfully analyzed all chunks in the batch.", 200
-
-    except Exception as e:
-        print(f"❌ Worker failed to process batch. Error: {e}")
-        traceback.print_exc()
-        return "Error processing batch.", 200
+if __name__ == "__main__":
+    main()

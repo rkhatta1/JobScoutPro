@@ -37,38 +37,62 @@ class JobRightScraper:
         return True
 
     def login(self, email, password):
-        """Login to JobRight"""
-        try:
-            print("Navigating to JobRight...")
-            self.driver.get("https://jobright.ai/")
-            
-            # Click sign in button
-            signin_btn = WebDriverWait(self.driver, 15).until(
-                EC.element_to_be_clickable((By.XPATH, "//span[text()='SIGN IN']"))
-            )
-            signin_btn.click()
-            
-            # Enter credentials
-            email_field = WebDriverWait(self.driver, 10).until(
-                EC.visibility_of_element_located((By.XPATH, "//input[@id='basic_email']"))
-            )
-            password_field = self.driver.find_element(By.XPATH, "//input[@id='basic_password']")
-            
-            email_field.send_keys(email)
-            password_field.send_keys(password)
-            password_field.send_keys(Keys.RETURN)
-            
-            # Wait for login success
-            WebDriverWait(self.driver, 20).until(
-                EC.presence_of_element_located((By.XPATH, "//span[text()='Profile']"))
-            )
-            print("✅ Login successful!")
-            return True
-            
-        except Exception as e:
-            print(f"❌ Login failed: {e}")
-            self.driver.save_screenshot("/app/screenshots/login_failure.png")
-            return False
+        """Login to JobRight with improved stability and retries"""
+        for attempt in range(3): # Try to log in up to 3 times
+            try:
+                print(f"Navigating to JobRight... (Attempt {attempt + 1}/3)")
+                self.driver.get("https://jobright.ai/")
+                
+                # --- FIX 1: Handle potential cookie banners or overlays ---
+                # Give the page a moment to settle and for overlays to appear.
+                time.sleep(3) 
+                try:
+                    # This is a common pattern for cookie banners. Adjust if needed.
+                    cookie_accept_button = self.driver.find_element(By.XPATH, "//*[contains(text(), 'Accept') or contains(text(), 'Allow') or contains(text(), 'Got it')]")
+                    if cookie_accept_button.is_displayed():
+                        print("🍪 Found and clicked a cookie/consent button.")
+                        cookie_accept_button.click()
+                        time.sleep(1) # Wait for banner to disappear
+                except Exception:
+                    print("✅ No cookie banner found, proceeding.")
+
+                # --- FIX 2: Use a more robust wait for the sign-in button ---
+                print("Waiting for the 'SIGN IN' button to be clickable...")
+                signin_btn = WebDriverWait(self.driver, 30).until(
+                    EC.element_to_be_clickable((By.XPATH, "//span[text()='SIGN IN']"))
+                )
+                
+                # --- FIX 3: Use JavaScript click as a fallback ---
+                # This can bypass elements that might be covering the button.
+                print("Attempting to click 'SIGN IN' button...")
+                self.driver.execute_script("arguments[0].click();", signin_btn)
+
+                # Enter credentials
+                email_field = WebDriverWait(self.driver, 15).until(
+                    EC.visibility_of_element_located((By.XPATH, "//input[@id='basic_email']"))
+                )
+                password_field = self.driver.find_element(By.XPATH, "//input[@id='basic_password']")
+                
+                email_field.send_keys(email)
+                password_field.send_keys(password)
+                password_field.send_keys(Keys.RETURN)
+                
+                # Wait for login success
+                WebDriverWait(self.driver, 25).until(
+                    EC.presence_of_element_located((By.XPATH, "//span[text()='Profile']"))
+                )
+                print("✅ Login successful!")
+                return True # Exit the loop and function on success
+                
+            except Exception as e:
+                print(f"❌ Login attempt {attempt + 1} failed: {e}")
+                if attempt < 2: # If it's not the last attempt
+                    print("Retrying in 5 seconds...")
+                    time.sleep(5)
+                else:
+                    print("❌ All login attempts failed.")
+                    return False
+        return False
 
     def switch_to_most_recent(self):
         """Switch job sorting to 'Most Recent'"""

@@ -1,7 +1,5 @@
 python-dotenv
 setuptools
-Flask
-gunicorn
 gspread
 google-cloud-secret-manager
 oauth2client

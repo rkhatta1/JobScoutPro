@@ -9,4 +9,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # We no longer need scraper.py for this service
 COPY ai_analyzer.py .
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "540", "ai_analyzer:app"]
+ENTRYPOINT ["python3", "ai_analyzer.py"]
+CMD ["--urls-json", "[]", "--batch-id", "default"]
