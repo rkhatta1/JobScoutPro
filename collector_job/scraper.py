@@ -32,9 +32,13 @@ class JobRightScraper:
         options.add_argument("--disable-blink-features=AutomationControlled")
         
         print("Initializing Chrome driver...")
-        self.driver = uc.Chrome(options=options)
-        self.main_window = self.driver.current_window_handle
-        return True
+        try:
+            self.driver = uc.Chrome(options=options)
+            self.main_window = self.driver.current_window_handle
+            return True
+        except Exception as e:
+            print(f"❌ Error initializing Chrome driver: {e}")
+            return False
 
     def login(self, email, password):
         """Login to JobRight with improved stability and retries"""

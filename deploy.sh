@@ -93,6 +93,9 @@ gcloud iam service-accounts create dispatcher-sa --display-name="Job Scout Dispa
 gcloud iam service-accounts create collector-sa  --display-name="Job Scout Collector SA"  || true
 gcloud iam service-accounts create ai-analyzer-sa --display-name="Job Scout AI Analyzer SA" || true
 
+echo "⏳ Waiting 5 seconds for service account propagation..."
+sleep 5
+
 # 6) IAM bindings
 echo "🔐 Granting IAM roles..."
 
@@ -149,8 +152,8 @@ gcloud run jobs deploy "$COLLECTOR_JOB" \
   --image="$DOCKER_COLLECTOR_JOB" \
   --region="$REGION" \
   --service-account="$COLLECTOR_SA" \
-  --memory=4Gi \
-  --cpu=2 \
+  --memory=8Gi \
+  --cpu=4 \
   --task-timeout=1800s \
   --parallelism=1 \
   --set-env-vars="GCLOUD_PROJECT=$GCLOUD_PROJECT,TOPIC_NAME=$TOPIC_NAME" \
