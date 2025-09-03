@@ -121,13 +121,10 @@ class JobRightScraper:
             return False
 
     def load_jobs(self, target_count=150):
-        """Scroll to load jobs until we reach target count, with retries."""
+        """Scroll to load jobs until we reach target count"""
         print(f"Loading jobs until we have {target_count}...")
         job_card_selector = "//div[contains(@class, 'index_job-card-main__spahH')]"
         
-        stale_scroll_attempts = 0
-        MAX_STALE_ATTEMPTS = 3 # We will give up after 3 consecutive failed scrolls
-
         while True:
             job_cards = self.driver.find_elements(By.XPATH, job_card_selector)
             current_count = len(job_cards)
@@ -135,16 +132,16 @@ class JobRightScraper:
             print(f"Currently loaded: {current_count} jobs")
             
             if current_count >= target_count:
-                print(f"✅ Reached target of {target_count} jobs.")
                 break
                 
-            print("Scrolling to the bottom of the page...")
+            # Scroll to last card
             if job_cards:
                 self.driver.execute_script(
                     "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", 
                     job_cards[-1]
                 )
                 
+            # Wait for loading spinner
             try:
                 WebDriverWait(self.driver, 3).until(
                     EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'ant-spin-spinning')]"))
@@ -152,16 +149,12 @@ class JobRightScraper:
                 WebDriverWait(self.driver, 15).until_not(
                     EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'ant-spin-spinning')]"))
                 )
-                # If the wait succeeds, it means new jobs have loaded.
-                print("...New jobs detected!")
-                stale_scroll_attempts = 0 # Reset the counter on success
-            except Exception: # This will catch a TimeoutException
-                # If the wait times out, it means no new jobs appeared.
-                stale_scroll_attempts += 1
-                print(f"⚠️ No new jobs loaded in the last 15 seconds. Stale attempt #{stale_scroll_attempts}/{MAX_STALE_ATTEMPTS}.")
-
-            if stale_scroll_attempts >= MAX_STALE_ATTEMPTS:
-                print(f"❌ No new jobs loaded after {MAX_STALE_ATTEMPTS} consecutive attempts. Assuming end of list.")
+            except:
+                time.sleep(15)
+                
+            # Check if no new jobs loaded
+            if len(self.driver.find_elements(By.XPATH, job_card_selector)) == current_count:
+                print("No more jobs loading. Reached end of list.")
                 break
                 
         final_count = len(self.driver.find_elements(By.XPATH, job_card_selector))
