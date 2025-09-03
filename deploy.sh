@@ -33,7 +33,7 @@ done
 
 # Defaults
 TOPIC_NAME=${TOPIC_NAME:-scraped-urls}
-SCHEDULE=${SCHEDULE:-"0 9 * * 1-5"}      # 9AM weekdays
+SCHEDULE=${SCHEDULE:-"00 12 * * 1-6"}
 TIMEZONE=${TIMEZONE:-America/Denver}
 DISPATCHER_SA="dispatcher-sa@$GCLOUD_PROJECT.iam.gserviceaccount.com"
 COLLECTOR_SA="collector-sa@$GCLOUD_PROJECT.iam.gserviceaccount.com"
@@ -118,6 +118,12 @@ for s in gemini-api-key resume-latex google-sheet-id; do
     --role="roles/secretmanager.secretAccessor" >/dev/null
 done
 
+for s in gemini-api-key resume-latex google-sheet-id; do
+  gcloud secrets add-iam-policy-binding "$s" \
+    --member="serviceAccount:$DISPATCHER_SA" \
+    --role="roles/secretmanager.secretAccessor" >/dev/null
+done
+
 # 7) Pub/Sub
 echo "📨 Ensuring Pub/Sub topic '$TOPIC_NAME'..."
 gcloud pubsub topics create "$TOPIC_NAME" >/dev/null 2>&1 || true
@@ -160,6 +166,7 @@ gcloud run jobs deploy "$AI_JOB" \
   --cpu=2 \
   --task-timeout=1800s \
   --parallelism=1 \
+  --update-secrets="GOOGLE_SHEET_ID=google-sheet-id:latest,RESUME_LATEX=resume-latex:latest,GEMINI_API_KEY=gemini-api-key:latest" \
   --set-env-vars="GCLOUD_PROJECT=$GCLOUD_PROJECT" >/dev/null
 
 # Also grant invoker on the specific AI job (not strictly required with run.developer, but harmless)
@@ -179,7 +186,6 @@ gcloud run deploy "$TRIGGER_SVC" \
   --memory=512Mi \
   --cpu=1 \
   --timeout=60s \
-  --update-secrets="GOOGLE_SHEET_ID=google-sheet-id:latest,RESUME_LATEX=resume-latex:latest,GEMINI_API_KEY=gemini-api-key:latest" \
   --set-env-vars="GCLOUD_PROJECT=$GCLOUD_PROJECT,REGION=$REGION,AI_JOB_NAME=$AI_JOB" \
   --max-instances=5 >/dev/null
 TRIGGER_URL=$(gcloud run services describe "$TRIGGER_SVC" --region="$REGION" --format="value(status.url)")
