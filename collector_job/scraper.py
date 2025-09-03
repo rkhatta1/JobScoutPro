@@ -139,11 +139,18 @@ class JobRightScraper:
                 break
                 
             print("Scrolling to the bottom of the page...")
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            if job_cards:
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", 
+                    job_cards[-1]
+                )
                 
             try:
-                WebDriverWait(self.driver, 15).until(
-                    lambda driver: len(driver.find_elements(By.XPATH, job_card_selector)) > current_count
+                WebDriverWait(self.driver, 3).until(
+                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'ant-spin-spinning')]"))
+                )
+                WebDriverWait(self.driver, 15).until_not(
+                    EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'ant-spin-spinning')]"))
                 )
                 # If the wait succeeds, it means new jobs have loaded.
                 print("...New jobs detected!")
