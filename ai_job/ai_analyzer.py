@@ -135,7 +135,7 @@ def analyze_job_batch(urls_json):
 
         api_key = get_gemini_api_key()
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         
         all_good_matches = []
         
@@ -161,7 +161,7 @@ def analyze_job_batch(urls_json):
 
             Return a single JSON object with a key "good_matches". The value should be an array of objects. Each object in the array represents a good match and must have the keys "companyName", "positionName", and "url".
 
-            If no jobs are a good match, return an empty array for "good_matches".
+            If no jobs are a good match, return an empty array for "good_matches". **Only reply with the JSON. Nothing else preceding it or following it.**
 
             Example response format:
             {{
@@ -208,6 +208,7 @@ def analyze_job_batch(urls_json):
                         # It's a different error (e.g., JSONDecodeError, or another API error)
                         if isinstance(e, json.JSONDecodeError):
                              print(f"❌ JSON parse error for chunk {i+1}: {e}")
+                             print(f"Response was: {response.text}")
                         else:
                              print(f"❌ Non-rate-limit error processing chunk {i+1}: {e}")
                         break # Exit retry loop on other errors
