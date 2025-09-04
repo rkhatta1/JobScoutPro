@@ -3,17 +3,21 @@ import json
 import base64
 import traceback
 import argparse
+import time
 from datetime import datetime
 from google.cloud import secretmanager
 from google.auth import default
 import google.generativeai as genai
 import gspread
+from google.api_core import exceptions as gax_exceptions
 
 # Testing the gh workflow
 # --- Configuration ---
 GCP_PROJECT_ID = os.environ.get("GCLOUD_PROJECT")
 GEMINI_API_KEY = None
 RESUME_CONTENT = None
+MAX_RATE_LIMIT_RETRIES = 3
+RETRY_SLEEP_SECONDS = 60
 
 def get_gemini_api_key():
     """Fetches the Gemini API key from Secret Manager."""
@@ -48,6 +52,13 @@ def chunk_list(data, chunk_size):
     """Splits a list into smaller chunks of a specified size."""
     for i in range(0, len(data), chunk_size):
         yield data[i:i + chunk_size]
+
+def is_rate_limit_error(exc: Exception) -> bool:
+    """Detect 429/rate limit across common exception types/messages."""
+    s = str(exc).lower()
+    if isinstance(exc, (gax_exceptions.ResourceExhausted, gax_exceptions.TooManyRequests)):
+        return True
+    return ("429" in s) or ("rate limit" in s) or ("quota" in s) or ("exceeded" in s)
 
 def deduplicate_by_url(matches):
     """Simple deduplication by URL within current batch"""
@@ -124,7 +135,7 @@ def analyze_job_batch(urls_json):
 
         api_key = get_gemini_api_key()
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash-lite')
         
         all_good_matches = []
         
@@ -164,29 +175,42 @@ def analyze_job_batch(urls_json):
             }}
             """
             
-            try:
-                response = model.generate_content(prompt)
-                cleaned_response = response.text.strip().replace("```json", "").replace("```", "")
-                
-                if not cleaned_response:
-                    print(f"❌ Empty response from Gemini for chunk {i+1}")
-                    continue
+            retries = 0
+            while retries <= MAX_RATE_LIMIT_RETRIES:
+                try:
+                    response = model.generate_content(prompt)
+                    cleaned_response = response.text.strip().replace("```json", "").replace("```", "")
                     
-                analysis_result = json.loads(cleaned_response)
-                chunk_matches = analysis_result.get("good_matches", [])
-                
-                if chunk_matches:
-                    print(f"✅ Gemini found {len(chunk_matches)} good matches in this chunk.")
-                    all_good_matches.extend(chunk_matches)
-                else:
-                    print("❌ Gemini: No good matches found in this chunk.")
+                    if not cleaned_response:
+                        print(f"❌ Empty response from Gemini for chunk {i+1}")
+                        break # Exit retry loop, move to next chunk
+                        
+                    analysis_result = json.loads(cleaned_response)
+                    chunk_matches = analysis_result.get("good_matches", [])
                     
-            except json.JSONDecodeError as e:
-                print(f"❌ JSON parse error for chunk {i+1}: {e}")
-                continue
-            except Exception as e:
-                print(f"❌ Error processing chunk {i+1}: {e}")
-                continue
+                    if chunk_matches:
+                        print(f"✅ Gemini found {len(chunk_matches)} good matches in this chunk.")
+                        all_good_matches.extend(chunk_matches)
+                    else:
+                        print("❌ Gemini: No good matches found in this chunk.")
+                    
+                    break # Success, exit retry loop
+
+                except Exception as e:
+                    if is_rate_limit_error(e):
+                        retries += 1
+                        if retries > MAX_RATE_LIMIT_RETRIES:
+                            print(f"❌ Rate limit exceeded after {MAX_RATE_LIMIT_RETRIES} retries. Skipping chunk.")
+                            break # Exit retry loop
+                        print(f"⚠️ Rate limit hit. Waiting {RETRY_SLEEP_SECONDS}s... (Attempt {retries}/{MAX_RATE_LIMIT_RETRIES})")
+                        time.sleep(RETRY_SLEEP_SECONDS)
+                    else:
+                        # It's a different error (e.g., JSONDecodeError, or another API error)
+                        if isinstance(e, json.JSONDecodeError):
+                             print(f"❌ JSON parse error for chunk {i+1}: {e}")
+                        else:
+                             print(f"❌ Non-rate-limit error processing chunk {i+1}: {e}")
+                        break # Exit retry loop on other errors
 
         return all_good_matches
 
