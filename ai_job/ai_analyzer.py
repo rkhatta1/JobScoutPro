@@ -116,7 +116,7 @@ def check_against_existing_sheet_and_deduplicate(matches, sheet_id):
         print(f"⚠️ Error checking against existing sheet: {e}")
         return unique_matches
 
- def analyze_job_batch(jobs_json):
+def analyze_job_batch(jobs_json):
     """Analyzes a batch of job data and returns good matches"""
     try:
         jobs_to_process = json.loads(jobs_json)
@@ -161,7 +161,7 @@ def check_against_existing_sheet_and_deduplicate(matches, sheet_id):
 
             Return a single JSON object with a key "good_matches". The value should be an array of the original job objects that you determine are a good match.
 
-Assume the companyName and the positionName provided in the above mentioned jobs as truth. Do not replace them, only reply with the good matches from the bunch.
+            Assume the companyName and the positionName provided in the above mentioned jobs as truth. Do not replace them, only reply with the good matches from the bunch.
 
             If no jobs in the chunk are a good match, return an empty array for "good_matches". **Only reply with the JSON. Nothing else preceding it or following it.**
 
