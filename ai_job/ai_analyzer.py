@@ -11,7 +11,6 @@ import google.generativeai as genai
 import gspread
 from google.api_core import exceptions as gax_exceptions
 
-# Testing the gh workflow
 # --- Configuration ---
 GCP_PROJECT_ID = os.environ.get("GCLOUD_PROJECT")
 GEMINI_API_KEY = None
@@ -117,16 +116,16 @@ def check_against_existing_sheet_and_deduplicate(matches, sheet_id):
         print(f"⚠️ Error checking against existing sheet: {e}")
         return unique_matches
 
-def analyze_job_batch(urls_json):
-    """Analyzes a batch of URLs and returns good matches"""
+ def analyze_job_batch(jobs_json):
+    """Analyzes a batch of job data and returns good matches"""
     try:
-        urls_to_process = json.loads(urls_json)
+        jobs_to_process = json.loads(jobs_json)
         
-        if not urls_to_process:
+        if not jobs_to_process:
             print("Empty batch received.")
             return []
 
-        print(f"🧠 AI Analyzer Job processing {len(urls_to_process)} URLs.")
+        print(f"🧠 AI Analyzer Job processing {len(jobs_to_process)} jobs.")
         
         resume_latex = get_resume_content()
         if not resume_latex:
@@ -139,29 +138,32 @@ def analyze_job_batch(urls_json):
         
         all_good_matches = []
         
-        # Break URLs into smaller chunks of 5 (reduced for job reliability)
-        url_chunks = list(chunk_list(urls_to_process, 5))
+        # Break jobs into smaller chunks of 5 (reduced for job reliability)
+        job_chunks = list(chunk_list(jobs_to_process, 5))
 
-        for i, chunk in enumerate(url_chunks):
-            print(f"--- Processing Gemini chunk {i+1}/{len(url_chunks)} with {len(chunk)} URLs ---")
+        for i, chunk in enumerate(job_chunks):
+            print(f"--- Processing Gemini chunk {i+1}/{len(job_chunks)} with {len(chunk)} jobs ---")
+            
             
             prompt = f"""
-            You are an expert AI job scout. Your task is to analyze a list of job application URLs against the provided resume and identify the best matches.
+            You are an expert AI job scout. Your task is to analyze a list of job postings against the provided resume and identify the best matches.
 
             MY RESUME (in LaTeX):
             ---
             {resume_latex}
             ---
 
-            URLs to analyze in this chunk:
+            Jobs to analyze in this chunk:
             {json.dumps(chunk)}
 
-            For each URL, you must visit the page, read the job description, and strictly evaluate it against my resume.
-            Identify which of these jobs are a good match (a score of 40% or higher). A good match is a Software Engineer role for a new grad with less than 2 years of professional experience, and the required tech stack should align with the skills listed in my resume. Also, importantly, the job description must NOT explicitly require US citizenship or permanent residency.
+            For each job in the list, you must visit the provided URL, read the full job description, and strictly evaluate it against my resume.
+            Identify which of these jobs are a good match (a score of 40% or higher). A good match is a Software Engineer role for a new grad with less than 2 years of professional experience, and the required tech stack should align with the skills listed in my resume. **NO DATA ENGINEERING/MACHINE LEARNING/DATA ANALYST ROLES.** Also, importantly, the job description must NOT explicitly require US citizenship or permanent residency.
 
-            Return a single JSON object with a key "good_matches". The value should be an array of objects. Each object in the array represents a good match and must have the keys "companyName", "positionName", and "url".
+            Return a single JSON object with a key "good_matches". The value should be an array of the original job objects that you determine are a good match.
 
-            If no jobs are a good match, return an empty array for "good_matches". **Only reply with the JSON. Nothing else preceding it or following it.**
+Assume the companyName and the positionName provided in the above mentioned jobs as truth. Do not replace them, only reply with the good matches from the bunch.
+
+            If no jobs in the chunk are a good match, return an empty array for "good_matches". **Only reply with the JSON. Nothing else preceding it or following it.**
 
             Example response format:
             {{
@@ -174,7 +176,7 @@ def analyze_job_batch(urls_json):
                 ]
             }}
             """
-            
+          
             retries = 0
             while retries <= MAX_RATE_LIMIT_RETRIES:
                 try:
@@ -222,15 +224,15 @@ def analyze_job_batch(urls_json):
 
 def main():
     parser = argparse.ArgumentParser(description='AI Job Analyzer')
-    parser.add_argument('--urls-json', required=True, help='JSON string of URLs to analyze')
+    parser.add_argument('--jobs-json', required=True, help='JSON string of job data to analyze')
     parser.add_argument('--batch-id', default='unknown', help='Batch identifier for logging')
     
     args = parser.parse_args()
     
     print(f"🚀 Starting AI Analyzer Job (Batch: {args.batch_id})")
     
-    # Analyze the URLs
-    all_good_matches = analyze_job_batch(args.urls_json)
+    # Analyze the jobs
+    all_good_matches = analyze_job_batch(args.jobs_json)
     
     if all_good_matches:
         print(f"\n🔍 Found {len(all_good_matches)} matches. Processing deduplication...")

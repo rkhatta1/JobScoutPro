@@ -25,13 +25,13 @@ def trigger_ai_analyzer():
     try:
         data_str = base64.b64decode(pubsub_message["data"]).decode("utf-8")
         data = json.loads(data_str)
-        urls_to_process = data.get("urls", [])
+        jobs_to_process = data.get("jobs", [])
         
-        if not urls_to_process:
+        if not jobs_to_process:
             print(f"📝 Message {message_id}: Empty batch received.")
             return "Empty batch received.", 200
 
-        print(f"🚀 Message {message_id}: Triggering AI Analyzer Job for {len(urls_to_process)} URLs")
+        print(f"🚀 Message {message_id}: Triggering AI Analyzer Job for {len(jobs_to_process)} jobs")
         
         # Generate a unique batch ID
         batch_id = f"batch-{uuid.uuid4().hex[:8]}"
@@ -39,9 +39,9 @@ def trigger_ai_analyzer():
         client = run_v2.JobsClient()
         job_path = f"projects/{GCP_PROJECT}/locations/{GCP_LOCATION}/jobs/{AI_JOB_NAME}"
         
-        # Pass URLs as command arguments
+        # Pass jobs as command arguments
         args = [
-            "--urls-json", json.dumps(urls_to_process),
+            "--jobs-json", json.dumps(jobs_to_process),
             "--batch-id", batch_id
         ]
         

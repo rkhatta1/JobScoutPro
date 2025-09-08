@@ -18,7 +18,7 @@ class JobRightScraper:
     def __init__(self):
         self.driver = None
         self.main_window = None
-        self.job_urls = []
+        self.job_data = []
         
     def setup_driver(self):
         """Initialize Chrome driver with proper options for Docker"""
@@ -230,6 +230,12 @@ class JobRightScraper:
             time.sleep(2)
             print(f"📍 Scrolled to card #{card_index + 1}")
 
+            company_name_element = current_card.find_element(By.XPATH, ".//div[contains(@class, 'index_company-name__gKiOY')]")
+            company_name = company_name_element.text
+
+            job_title_element = current_card.find_element(By.XPATH, ".//h2[contains(@class, 'index_job-title__UjuEY')]")
+            job_title = job_title_element.text
+            print(f"Found Job: {job_title} at {company_name}")
             # Find apply button with more detailed logging
             try:
                 apply_button = WebDriverWait(current_card, 10).until(
@@ -322,14 +328,13 @@ class JobRightScraper:
             # Only return external URLs
             if "jobright.ai" not in job_url:
                 print(f"✅ Card #{card_index + 1}: {job_url}")
-                return job_url
+                return {"url": job_url, "companyName": company_name, "positionName": job_title}
             else:
                 print(f"⚠️ Card #{card_index + 1}: Internal URL, skipping")
                 return None
 
         except Exception as e:
             print(f"❌ Unexpected error processing card #{card_index + 1}: {type(e).__name__}: {e}")
-            # ... rest of cleanup code
 
     def scrape_jobs(self, max_jobs=150):
         """Main scraping function with configurable range"""
@@ -354,11 +359,11 @@ class JobRightScraper:
 
         for i in range(start_index, actual_end):
             print(f"\n--- {instance_name}: Processing job {i + 1}/{actual_end} (index {i}) ---")
-            url = self.process_job_card(i)
-            if url:
-                self.job_urls.append(url)
+            job_info = self.process_job_card(i)
+            if job_info:
+                self.job_data.append(job_info)
                 
-        return self.job_urls
+        return self.job_data
 
     def run(self):
         """Main execution flow"""
@@ -386,10 +391,10 @@ class JobRightScraper:
                 return []
 
             self.load_jobs(150)  # Both instances load all 150 jobs
-            urls = self.scrape_jobs(150)  # But each processes different ranges
+            jobs = self.scrape_jobs(150)  # But each processes different ranges
 
-            print(f"🎯 {instance_name}: Collected {len(urls)} URLs")
-            return urls
+            print(f"🎯 {instance_name}: Collected {len(jobs)} jobs")
+            return jobs
 
         except Exception as e:
             print(f"❌ Fatal error in {instance_name}: {e}")
@@ -402,14 +407,14 @@ class JobRightScraper:
 
 if __name__ == "__main__":
     scraper = JobRightScraper()
-    collected_urls = scraper.run()
+    collected_jobs = scraper.run()
     
     print(f"\n{'='*50}")
     print(f"SCRAPING COMPLETE")
     print(f"{'='*50}")
-    print(f"Total URLs collected: {len(collected_urls)}")
+    print(f"Total jobs collected: {len(collected_jobs)}")
     
-    if collected_urls:
+    if collected_jobs:
         GCP_PROJECT_ID = os.environ.get("GCLOUD_PROJECT")
         TOPIC_ID = "scraped-urls"
         
@@ -424,18 +429,19 @@ if __name__ == "__main__":
             return [data[i*k+min(i, m):(i+1)*k+min(i+1, m)] for i in range(num_chunks)]
 
         num_batches = 2  # Based on worker's max-instances
-        url_batches = chunk_list(list(set(collected_urls)), num_batches)
+        job_batches = chunk_list(list({json.dumps(d) for d in collected_jobs}), num_batches)
         
-        print(f"\n--- Publishing {len(collected_urls)} URLs in {num_batches} batches ---")
+        print(f"\n--- Publishing {len(collected_jobs)} jobs in {num_batches} batches ---")
         
-        for i, batch in enumerate(url_batches):
+        for i, batch_str in enumerate(job_batches):
+            batch = [json.loads(s) for s in batch_str]
             if not batch: continue
             
-            message_data = {"urls": batch}
+            message_data = {"jobs": batch}
             message_future = publisher.publish(topic_path, data=json.dumps(message_data).encode("utf-8"))
             message_future.result() # Wait for the publish to complete
-            print(f"🚀 Dispatched batch #{i+1} with {len(batch)} URLs.")
+            print(f"🚀 Dispatched batch #{i+1} with {len(batch)} jobs.")
             
-        print("✅ All URLs published successfully.")
+        print("✅ All jobs published successfully.")
     else:
-        print("No URLs were collected.")
+        print("No jobs were collected.")
