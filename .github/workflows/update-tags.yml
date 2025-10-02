@@ -59,7 +59,7 @@ jobs:
               
               # Use sed to replace the line in the .example.env file
               # The `^` ensures we only match at the beginning of a line
-              sed -i "s|^${ENV_VAR}=.*|${ENV_VAR}=${DOCKER_USER}/${REPO_NAME}:${LATEST_TAG}|" .example.env
+              sed -i "s|^${ENV_VAR}=.*|${ENV_VAR}=docker.io/${DOCKER_USER}/${REPO_NAME}:${LATEST_TAG}|" .example.env
               echo "Updated ${ENV_VAR} in .example.env"
             fi
           done

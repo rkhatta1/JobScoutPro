@@ -1,6 +1,6 @@
 selenium
 python-dotenv
-undetected-chromedriver
+undetected-chromedriver==3.5.3
 setuptools
 google-cloud-pubsub
 requests

@@ -6,8 +6,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # 1. Define the pinned version at the top for easy updates
 # The base version is for the driver, the package version is for apt-get.
-ENV CHROME_VERSION_BASE="140.0.7339.80"
-ENV CHROME_PACKAGE_VERSION="140.0.7339.80-1"
+ENV CHROME_VERSION_BASE="141.0.7390.54"
+ENV CHROME_PACKAGE_VERSION="141.0.7390.54-1"
 
 # 2. Install system dependencies, including jq for parsing JSON
 RUN apt-get update && apt-get install -y \
